@@ -1,0 +1,4 @@
+# Preserve the checksum-verified initial snapshot across host platforms.
+# Core source is deliberately unchanged; do not auto-convert its line endings.
+* -text
+*.zip binary

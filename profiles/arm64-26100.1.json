@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "id": "local-arm64-26100.1-static-v1",
+  "source_sha256": "97f70142be8c7e06274aee03d87b9b6e70fa2a9d505455fba356ad9b882d46ee",
+  "inf_sha256": "b84c61c50731a446fc44a70deb9da9a046c6eeace16041978bfec53ee25db30e",
+  "output_sha256": "b325085fa2e6d18c65c8cb800b5eb3e721b59b08d6eb2adc35f3d0a4c33d3866",
+  "source_version": "10.0.26100.1",
+  "provenance": "https://github.com/farjanatech/rpi5-nvme-version-aware-tool/blob/a464bf9a12b47077653a2c2a8743e41b9fbd3164/docs/REAL_INPUT_REVIEW.md",
+  "recipe_blob_sha1": "c0a207c6a0eec2e7fd19de9112ee6d308054ed06",
+  "runtime_evidence": "Static review and reproducible build on user-supplied real input only. Windows loading, Pi 5 I/O and boot NOT TESTED.",
+  "inf_model_section": "NVME.NTarm64",
+  "inf_install_section": "Stornvme_Inst",
+  "inf_date": "10/12/2026",
+  "edits": [
+    {
+      "rva": 13092,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 13188,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 28616,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 28972,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 40560,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 41068,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 55740,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 56304,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 19608,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 22140,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 27492,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 40996,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 43024,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 43912,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 44828,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 45288,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 57136,
+      "before": "24008052",
+      "after": "04008052"
+    }
+  ],
+  "helper": {
+    "rva": 223088,
+    "section": ".text",
+    "bytes": "e90302aa2a054091297a0bd5290101913f010aeba3ffff549f3f03d500011fd6"
+  },
+  "calls": [
+    {
+      "rva": 38140,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 38624,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 118296,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 133228,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 215728,
+      "before": "00013fd6"
+    }
+  ],
+  "relocation": {
+    "mode": "arm64-import-transfer-v1",
+    "table_size": 4788,
+    "register": 8,
+    "iat_index": 0,
+    "indirect_call": 1
+  },
+  "review": {
+    "level": "REAL_INPUT_STATIC_ONLY",
+    "date": "2026-10-12",
+    "allocation_edit_count": 8,
+    "release_edit_count": 9,
+    "prp_redirect_count": 5,
+    "original_pdb": [
+      {
+        "pdb_name": "stornvme.pdb",
+        "guid": "E11C23B6D9F2AC37B415AE2184815C90",
+        "age": 1,
+        "symbol_key": "E11C23B6D9F2AC37B415AE2184815C901"
+      }
+    ],
+    "context_sha256": [
+      {
+        "rva": 38044,
+        "length": 124,
+        "sha256": "04b1552ba82620afa7a6065eae0b054246b5fd108b7d2d7d984771a08e91fb6f"
+      },
+      {
+        "rva": 38528,
+        "length": 124,
+        "sha256": "64e23e32da5c6be6dc15b78fe6112083324c263997c5a89a10f88d3c5b79a61c"
+      },
+      {
+        "rva": 118200,
+        "length": 124,
+        "sha256": "51e5e90f7fd62be706a4688b3ef35b8b64dbf6a3d329dcb2b90e3ec034b61dee"
+      },
+      {
+        "rva": 133132,
+        "length": 124,
+        "sha256": "829abfb967ac0eeb6de0ff7fb98b93b5967d42f66cc2bccfba05e4bbfc24752d"
+      },
+      {
+        "rva": 215632,
+        "length": 124,
+        "sha256": "983053e42a47228f3c83c1c68879fe405d8eae23ee94897f7961b34b51324508"
+      }
+    ],
+    "limitations": [
+      "No Microsoft signature-chain validation was performed here.",
+      "A reproducible output is not evidence of correct DMA behavior.",
+      "Retains the upstream fixed 4 KiB / 64-byte cache-line helper assumptions.",
+      "Unsigned output is NOT a complete installable driver package."
+    ]
+  }
+}

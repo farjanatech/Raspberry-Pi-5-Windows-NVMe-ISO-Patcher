@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "id": "upstream-arm64-26100.9539",
+  "source_sha256": "10330d2cf54a03208c677713332c77e38ce5c0029d87cf7a0fd9af33e121d249",
+  "inf_sha256": "8cfb0401ac12f2ce0a9a2dfe80a3eaba999997cb4e7c293ab03be62ae9e1fed1",
+  "output_sha256": "f647dd0e011997ef8c652d3cd9a887963cb31f202a7d0f0505c6221e787a8530",
+  "source_version": "10.0.26100.9539",
+  "provenance": "https://github.com/damian5466/rpi5-windows-drivers/blob/main/nvme/build.py",
+  "recipe_blob_sha1": "c0a207c6a0eec2e7fd19de9112ee6d308054ed06",
+  "runtime_evidence": "Upstream reports Windows ARM64 26200.9539 / Pi 5 D0. Not tested here.",
+  "inf_model_section": "NVME.NTarm64",
+  "inf_install_section": "Stornvme_Inst",
+  "inf_date": "09/19/2026",
+  "edits": [
+    {
+      "rva": 18492,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 18588,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 21784,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 21860,
+      "before": "26008052",
+      "after": "06008052"
+    },
+    {
+      "rva": 21976,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 25960,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 26520,
+      "before": "24008052",
+      "after": "04008052"
+    },
+    {
+      "rva": 28248,
+      "before": "24008052",
+      "after": "04008052"
+    }
+  ],
+  "helper": {
+    "rva": 237456,
+    "section": ".text",
+    "bytes": "e90302aa2a054091297a0bd5290101913f010aeba3ffff549f3f03d500011fd6"
+  },
+  "calls": [
+    {
+      "rva": 46676,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 47160,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 130332,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 145564,
+      "before": "00013fd6"
+    },
+    {
+      "rva": 232232,
+      "before": "00013fd6"
+    }
+  ],
+  "relocation": {
+    "mode": "arm64-import-transfer-v1",
+    "table_size": 5316,
+    "register": 8,
+    "iat_index": 28,
+    "indirect_call": 1
+  }
+}

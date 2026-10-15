@@ -1,0 +1,68 @@
+name: Desktop and native Linux tests
+on:
+  push:
+    branches: [main, codex/repository-migration]
+    paths:
+      - 'pi5_studio/**'
+      - 'pi5_nvme_gui.py'
+      - 'pi5_nvme_tool.py'
+      - 'install-raspberry-pi.sh'
+      - 'pi5_nvme_profiles.py'
+      - 'profiles/**'
+      - 'linux_test_sign.py'
+      - 'install_desktop.py'
+      - 'uninstall_desktop.py'
+      - 'uninstall-raspberry-pi.sh'
+      - 'docs/UNINSTALL.md'
+      - 'tests/**'
+      - 'tools/verify_source.py'
+      - 'SOURCE_MANIFEST.json'
+      - 'assets/**'
+      - '.github/workflows/desktop-tests.yml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          persist-credentials: false
+      - name: Install native image readers and Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full wimtools xorriso openssl osslsigncode python3-hivex mtools libegl1 libopengl0 libxcb-cursor0 desktop-file-utils
+          python3 -m venv "$RUNNER_TEMP/studio-venv"
+          "$RUNNER_TEMP/studio-venv/bin/python" -m pip install --only-binary=:all: 'PySide6-Essentials>=6.8,<7'
+      - name: Preflight (do not silently skip native or GUI tests)
+        run: |
+          "$RUNNER_TEMP/studio-venv/bin/python" -c 'from pi5_studio.iso_gui import Window; from pi5_studio.packages import native_versions; native_versions(); from pi5_studio.backend import tools_available; import shutil; assert all(tools_available().values()); assert shutil.which("xorriso"); from tests.image_fixtures import native_ready; assert native_ready(); assert shutil.which("osslsigncode"); assert shutil.which("openssl")'
+      - name: Check uninstall entry point without touching the runner home
+        run: |
+          bash -n uninstall-raspberry-pi.sh
+          /usr/bin/python3 uninstall_desktop.py --help
+          /usr/bin/python3 -m unittest -v tests.test_uninstall
+      - name: Run original and desktop tests
+        run: |
+          "$RUNNER_TEMP/studio-venv/bin/python" -m unittest -v test_pi5_nvme_tool
+          "$RUNNER_TEMP/studio-venv/bin/python" -m unittest discover -s tests -v
+          "$RUNNER_TEMP/studio-venv/bin/python" tools/verify_source.py
+      - name: Render the actual empty desktop application
+        run: |
+          mkdir -p preview
+          "$RUNNER_TEMP/studio-venv/bin/python" pi5_nvme_gui.py --screenshot preview/desktop.png
+      - name: Save UI preview (not hardware validation)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: desktop-preview-${{ matrix.os }}
+          path: preview/*.png
+          retention-days: 14
