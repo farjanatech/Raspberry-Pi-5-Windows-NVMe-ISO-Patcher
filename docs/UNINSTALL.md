@@ -32,6 +32,8 @@ which project folders may contain personal data.
 
 ## 1. Get the uninstaller
 
+The [README uninstall command](../README.md#uninstall) downloads and verifies the standalone uninstaller, runs complete managed-app cleanup and saves a local log. It works from any folder, including when the source checkout is gone.
+
 For an existing Git checkout, open a terminal in that repository and run:
 
 ```bash

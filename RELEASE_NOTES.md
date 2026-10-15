@@ -1,3 +1,11 @@
+# Version 2.1.2 - supplied icon and complete README uninstall command
+
+The app/window, GUI header, desktop and menu now use the owner's newly supplied icon, copied without altering its pixels. The existing asset path remains compatible with installation and removal.
+
+The README includes a complete command that downloads and checksum-verifies the standalone uninstaller from this repository, removes recognized app snapshots/launchers/preferences and saves a local log. It works without a checkout or Qt and explains retained user data, source folders and shared dependencies.
+
+Driver patching, signing, ISO building and the uninstaller's removal behavior are unchanged. This update does not require rebuilding an existing Windows ISO.
+
 # Version 2.1.1 - self-contained references
 
 The former repository has been deleted by its owner. Driver-profile provenance now links to a versioned note in this repository, and migration/licensing notes describe the current state. The README reports the maintenance version. Use release and uninstall downloads from this repository only.
