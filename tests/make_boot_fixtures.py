@@ -79,6 +79,29 @@ def create(root):
     h.commit(str(root/'BCD-BINARY'))
     sz(h,loader+r'\Elements\12000002','Element',r'\Windows\System32\Boot\winload.exe',1)
     h.commit(str(root/'BCD-BIOS'))
+    # A deployment template is not a fully populated boot store. Include the
+    # reported pathless Setup object, explicit EFI/BIOS defaults, a type-only
+    # loader and unrelated objects to check preservation without Windows data.
+    h=hivex.Hivex(str(seed),write=True)
+    template_loaders = (
+        ('{7254a080-1510-4e85-ac0f-e7fb3d444736}', None),
+        ('{b012b84d-c47c-4ed5-b722-c0c42163e569}', r'\Windows\System32\winload.efi'),
+        ('{a1943bbc-ea85-487c-97c7-c9ede908a38a}', r'\Windows\System32\winload.exe'),
+        ('{cbd971bf-b7b8-4885-951a-fa03044f5d71}', None),
+    )
+    for identifier, path in template_loaders:
+        base = 'Objects\\'+identifier
+        dw(h,base+r'\Description','Type',0x10200003)
+        if identifier != '{cbd971bf-b7b8-4885-951a-fa03044f5d71}':
+            sz(h,base+r'\Elements\22000002','Element',r'\Windows')
+        if path:
+            sz(h,base+r'\Elements\12000002','Element',path)
+    dw(h,mgr+r'\Description','Type',0x10100002)
+    settings=r'Objects\{6efb52bf-1766-41db-a6b3-0ee5eff72bd7}'
+    dw(h,settings+r'\Description','Type',0x20200003)
+    sz(h,settings+r'\Elements\12000004','Element','Preserve these unrelated settings')
+    sz(h,'PreserveMe','String','unchanged deployment template')
+    h.commit(str(root/'BCD-TEMPLATE'))
 
 
 if __name__=='__main__':

@@ -11,6 +11,7 @@ from pi5_studio.backend import StudioError
 from tests.image_fixtures import native_ready, synthetic_iso, run, listing
 from tests.test_native_tools import capture
 from tests.test_catalog_packages import package_fixture
+from tests.test_bcd_strings import DUMP
 
 class BuildGuards(unittest.TestCase):
     def test_existing_paths_are_never_overwritten(self):
@@ -58,7 +59,7 @@ def original_fixture(root, missing_startup=()):
     tree = root/'image'
     (tree/'Windows/INF/stornvme.inf').write_bytes(inf)
     shutil.copyfile(root/'hives/SOFTWARE', tree/'Windows/System32/config/SOFTWARE')
-    shutil.copyfile(root/'hives/BCD', tree/'Windows/System32/config/BCD-Template')
+    shutil.copyfile(root/'hives/BCD-TEMPLATE', tree/'Windows/System32/config/BCD-Template')
     (tree/'Windows/System32/startnet.cmd').write_bytes(b'wpeinit\r\n')
     (tree/'Windows/System32/winpeshl.ini').write_bytes(b'[LaunchApp]\r\nAppPath=X:\\sources\\setup.exe\r\n')
     (tree/'sources').mkdir()
@@ -153,6 +154,19 @@ print(json.dumps({'image':h.text(h.get(system,r'ControlSet001\Services\stornvme'
                 recovery = root/f'recovery-{index}.wim'
                 recovery.write_bytes(run('wimlib-imagex', 'extract', install, index,
                                          '/Windows/System32/Recovery/winre.wim', '--to-stdout'))
+                template = root/f'prepared-template-{index}'
+                template.write_bytes(run('wimlib-imagex', 'extract', install, index,
+                                         '/Windows/System32/config/BCD-Template', '--to-stdout'))
+                template_before = json.loads(run('/usr/bin/python3', '-c', DUMP, root/'hives/BCD-TEMPLATE'))
+                template_after = json.loads(run('/usr/bin/python3', '-c', DUMP, template))
+                template_report = next(r for r in result['hives']
+                                       if r['environment'] == f'install-{index}' and r['mode'] == 'template')
+                self.assertEqual(len(template_report['changes']), 5)
+                for change in template_report['changes']:
+                    self.assertTrue(change['path'].endswith(r'\Elements\16000049'))
+                    self.assertEqual(template_after[change['path']].pop('Element'), [3,'01'])
+                self.assertEqual({p:v for p,v in template_before.items() if v},
+                                 {p:v for p,v in template_after.items() if v})
                 for image, image_index in ((boot, index), (install, index), (recovery, 1)):
                     hives = []
                     for name in ('SYSTEM', 'SOFTWARE'):

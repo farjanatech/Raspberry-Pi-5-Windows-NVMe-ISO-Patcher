@@ -20,6 +20,8 @@ The original Microsoft EFI loader and boot-image file remain. No Raspberry Pi fi
 
 Test-signing is set in the ISO's EFI boot BCD and each Windows edition's BCD template. Secure Boot must be off for locally test-signed drivers. WoR-Flasher or another deployer may replace boot configuration; an ISO cannot guarantee settings in an externally generated BCD.
 
+The ISO boot store and the Windows deployment template have separate validation rules. The actual ISO boot entry must identify an EFI WinPE loader. In `BCD-Template`, typed Windows OS loader objects can omit the application-path element (`12000002`) or retain standard EFI/BIOS loader defaults. Missing paths are not fabricated, existing paths and unrelated settings are retained, and test-signing is enabled on the Windows loader and boot-manager objects. Present but malformed path values still stop the build. [BCDBoot uses the template to construct the deployed boot store](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/bcdboot-command-line-options-techref-di?view=windows-11).
+
 WIM integrity, signed package membership, changed-file readback, original Setup files, final ISO contents and original-input identity are checked before the new output is published. Private keys are deleted after signing and never placed in the ISO or public CI.
 
 ## Limits

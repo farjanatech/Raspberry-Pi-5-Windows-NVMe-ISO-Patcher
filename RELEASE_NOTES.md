@@ -1,3 +1,11 @@
+# Version 2.1.4 - handle deployment BCD templates separately from boot stores
+
+The offline hive editor incorrectly required an explicit EFI application path in every Windows loader object of BCD-Template. This produced a missing Elements/12000002 error for a template entry such as {7254a080-1510-4e85-ac0f-e7fb3d444736}.
+
+Template mode now preserves omitted paths and standard EFI/BIOS loader defaults while setting test-signing on typed Windows loader and boot-manager objects. It does not create loader paths or change other template settings. Malformed existing path values still fail. The ISO's actual boot store continues to require an explicit EFI WinPE loader. Hive errors now identify the operation and source filename.
+
+Regression coverage includes the reported pathless object, mixed template layouts, native hive commit/readback and completed synthetic ISO builds that verify the prepared BCD template in every Windows edition. The previous optional-startup-file fix remains included. Driver patch recipes, signing, firmware policy, Microsoft Setup and the GUI workflow are unchanged. Software verification does not establish a completed build of the user's exact ISO or hardware installation.
+
 # Version 2.1.3 - preserve optional Windows PE startup files
 
 Version 2.1.2 stopped with wimlib error 49 when an original Setup image did not contain Windows/System32/winpeshl.ini. The builder now inventories both boot images before driver preparation and preserves the presence or absence of their startup files. It verifies existing content and continued absence after integration, while still requiring the original Setup executable in image 2. Inventory, extraction and corruption errors still stop the build.

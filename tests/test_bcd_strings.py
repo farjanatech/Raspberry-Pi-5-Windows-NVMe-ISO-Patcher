@@ -18,6 +18,7 @@ EFI = r'\windows\system32\boot\winload.efi'
 LOADER = r'Objects\{7619dcc9-fafe-11d9-b411-000476eba25f}'
 MANAGER = r'Objects\{9dea862c-5cdd-4e70-acc1-f32b344d4795}'
 PATH_KEY = LOADER + r'\Elements\12000002'
+SETUP_TEMPLATE = r'Objects\{7254a080-1510-4e85-ac0f-e7fb3d444736}'
 
 
 def path_value(value=EFI, kind=1):
@@ -26,8 +27,8 @@ def path_value(value=EFI, kind=1):
 
 class MemoryHive:
     """Minimal read-only hivex-shaped fixture; no native hive is needed."""
-    def __init__(self, kind=1):
-        self.values = {
+    def __init__(self, kind=1, values=None):
+        self.values = values if values is not None else {
             LOADER+r'\Description': {'Type': (4, struct.pack('<I', 0x10200003))},
             LOADER+r'\Elements\26000022': {'Element': (3, b'\x01')},
             PATH_KEY: {'Element': path_value(kind=kind)},
@@ -116,6 +117,62 @@ class BcdStringTests(unittest.TestCase):
         with self.assertRaises(bh.HiveError): bh.plan_bcd(h)
 
 
+class BcdTemplateTests(unittest.TestCase):
+    def template(self, path=None, empty_element=False):
+        values = {
+            SETUP_TEMPLATE+r'\Description': {'Type': (4, struct.pack('<I', 0x10200003))},
+            SETUP_TEMPLATE+r'\Elements\22000002': {'Element': path_value(r'\Windows')},
+            MANAGER+r'\Description': {'Type': (4, struct.pack('<I', 0x10100002))},
+        }
+        if path is not None or empty_element:
+            values[SETUP_TEMPLATE+r'\Elements\12000002'] = {} if empty_element else {'Element': path}
+        return MemoryHive(values=values)
+
+    def test_template_with_no_loader_path_changes_only_testsigning(self):
+        hive = self.template(); before = copy.deepcopy(hive.values)
+        changes = bh.plan_bcd(hive, template=True)
+        self.assertEqual(set(changes), {
+            (base+r'\Elements\16000049', 'Element', 3, b'\x01') for base in (SETUP_TEMPLATE, MANAGER)})
+        self.assertEqual(hive.values, before)
+
+    def test_template_loader_without_elements_is_preserved(self):
+        hive = self.template()
+        values = {p:v for p,v in hive.values.items() if not p.startswith(SETUP_TEMPLATE+r'\Elements')}
+        hive = MemoryHive(values=values)
+        self.assertEqual(len(bh.plan_bcd(hive, template=True)), 2)
+
+    def test_existing_efi_and_bios_template_paths_are_preserved(self):
+        for suffix in ('efi', 'exe'):
+            for directory in (r'\Windows\System32', r'\Windows\System32\Boot'):
+                for kind in (1, 3):
+                    with self.subTest(suffix=suffix, directory=directory, kind=kind):
+                        hive = self.template(path_value(directory+'\\winload.'+suffix, kind))
+                        before = copy.deepcopy(hive.values)
+                        self.assertEqual(len(bh.plan_bcd(hive, template=True)), 2)
+                        self.assertEqual(hive.values, before)
+
+    def test_template_rejects_present_but_missing_or_malformed_path_values(self):
+        with self.assertRaisesRegex(bh.HiveError, 'Required registry value missing'):
+            bh.plan_bcd(self.template(empty_element=True), template=True)
+        for path in (path_value(kind=4), (1,b''), (1,EFI.encode('utf-16-le')),
+                     path_value(r'\unrelated\winload.efi')):
+            with self.subTest(path=path), self.assertRaises(bh.HiveError):
+                bh.plan_bcd(self.template(path), template=True)
+
+    def test_missing_path_in_actual_winpe_boot_store_is_still_rejected(self):
+        hive = self.template()
+        values = dict(hive.values)
+        values[SETUP_TEMPLATE+r'\Elements\26000022'] = {'Element': (3,b'\x01')}
+        with self.assertRaisesRegex(bh.HiveError, 'Required registry path missing'):
+            bh.plan_bcd(MemoryHive(values=values))
+
+    def test_template_without_a_windows_loader_is_rejected(self):
+        hive = self.template()
+        hive.values[SETUP_TEMPLATE+r'\Description']['Type'] = (4,struct.pack('<I',0x10200004))
+        with self.assertRaises(bh.HiveError):
+            bh.plan_bcd(hive, template=True)
+
+
 def hivex_ready():
     try:
         return subprocess.run(['/usr/bin/python3','-c','import hivex'],
@@ -138,6 +195,28 @@ walk(h.root(),'');print(json.dumps(out,sort_keys=True))
 
 @unittest.skipUnless(hivex_ready(), 'Requires system python3-hivex; no Windows hive is bundled')
 class NativeBcdStringTests(unittest.TestCase):
+    def test_template_commit_preserves_missing_paths_and_every_unrelated_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            run('/usr/bin/python3',bt.ROOT/'tests/make_boot_fixtures.py',root)
+            source=root/'BCD-TEMPLATE'; output=root/'prepared-template'
+            original=source.read_bytes()
+            before=json.loads(run('/usr/bin/python3','-c',DUMP,source))
+            result=json.loads(run('/usr/bin/python3',bt.ROOT/'pi5_studio/boot_hives.py',
+                                  'template',source,output))
+            after=json.loads(run('/usr/bin/python3','-c',DUMP,output))
+            self.assertTrue(result['readback_verified'])
+            self.assertEqual(result['mode'], 'template')
+            self.assertEqual(len(result['changes']), 5)
+            self.assertNotIn(SETUP_TEMPLATE+r'\Elements\12000002',after)
+            for change in result['changes']:
+                self.assertTrue(change['path'].endswith(r'\Elements\16000049'))
+                self.assertEqual((change['key'],change['type'],change['hex']),('Element',3,'01'))
+                self.assertEqual(after[change['path']].pop('Element'),[3,'01'])
+            self.assertEqual({p:v for p,v in before.items() if v},
+                             {p:v for p,v in after.items() if v})
+            self.assertEqual(source.read_bytes(),original)
+
     def test_reg_sz_and_binary_commit_preserve_all_other_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

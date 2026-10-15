@@ -102,30 +102,35 @@ def plan_system(h):
     return changes
 
 
-def bcd_loader_path(value):
-    """Read the EFI application path without rewriting its registry representation.
+def bcd_loader_path(value, *, template=False):
+    """Validate an existing loader path without rewriting its representation.
 
     Real Windows media stores this element as REG_SZ (1). Older Studio fixtures
     used REG_BINARY (3) containing the same UTF-16LE string; retain that explicit
     compatibility, but never coerce arbitrary registry types or guess a loader.
+    A deployment template can contain both EFI and BIOS defaults; the actual
+    ISO boot store still requires an explicit EFI path.
     """
-    require(value is not None, 'BCD EFI application path is missing')
+    require(value is not None, 'BCD application path is missing')
     kind, raw = value
     require(kind in (1, 3),
-            f'BCD EFI application path has registry type {kind}; expected REG_SZ (1) or legacy REG_BINARY (3)')
+            f'BCD application path has registry type {kind}; expected REG_SZ (1) or legacy REG_BINARY (3)')
     require(2 <= len(raw) <= 1024 and len(raw) % 2 == 0,
-            'BCD EFI application path has an invalid UTF-16LE byte length')
+            'BCD application path has an invalid UTF-16LE byte length')
     try:
         decoded = raw.decode('utf-16-le')
     except UnicodeError as exc:
-        raise HiveError('BCD EFI application path is not valid UTF-16LE') from exc
-    require(decoded.endswith('\0'), 'BCD EFI application path has no terminating NUL')
+        raise HiveError('BCD application path is not valid UTF-16LE') from exc
+    require(decoded.endswith('\0'), 'BCD application path has no terminating NUL')
     path = decoded[:-1]
     require(path and not any(ord(c) < 32 or ord(c) == 127 for c in path),
-            'BCD EFI application path contains an embedded NUL or control character')
+            'BCD application path contains an embedded NUL or control character')
     allowed = (r'\windows\system32\boot\winload.efi', r'\windows\system32\winload.efi')
+    if template:
+        allowed += tuple(p[:-3]+'exe' for p in allowed)
     require(path.lower() in allowed,
-            f'This image requires an EFI WinPE loader; found {path!r} (registry type {kind})')
+            ('Unexpected Windows loader path in BCD template' if template else
+             'This image requires an EFI WinPE loader')+f'; found {path!r} (registry type {kind})')
     return path
 
 
@@ -138,16 +143,24 @@ def plan_bcd(h, template=False):
         base = 'Objects\\'+name
         kind = dword(get(h, base+r'\Description', 'Type'))
         if kind == 0x10200003:  # Windows OS loader, NOT an arbitrary BCD object.
-            if not template:
+            if template:
+                # BCD-Template supplies defaults to BCDBoot/Setup; its loader
+                # objects need not contain a deployed application path yet.
+                # Preserve absence instead of inventing a path or skipping
+                # test-signing. A present but malformed element still fails.
+                elements = h.node_get_child(n, 'Elements')
+                if elements and h.node_get_child(elements, '12000002'):
+                    bcd_loader_path(get(h, base+r'\Elements\12000002', 'Element'), template=True)
+            else:
                 winpe = get(h, base+r'\Elements\26000022', 'Element')
                 require(winpe == (3, b'\x01'), 'BCD OS loader is not explicitly a WinPE loader')
-            path = get(h, base+r'\Elements\12000002', 'Element')
-            bcd_loader_path(path)
+                bcd_loader_path(get(h, base+r'\Elements\12000002', 'Element'))
             loaders += 1
         elif kind != 0x10100002:  # Windows Boot Manager
             continue
         changes.append((base+'\\Elements\\'+TESTSIGNING, 'Element', 3, b'\x01'))
-    require(loaders > 0, 'No EFI WinPE boot entry found; BCD not changed')
+    require(loaders > 0, 'No Windows OS loader template found; BCD not changed' if template else
+            'No EFI WinPE boot entry found; BCD not changed')
     return changes
 
 
@@ -183,7 +196,7 @@ def main():
     try:
         print(json.dumps(edit(a.source, a.output, a.mode), indent=2))
     except (HiveError, ImportError, RuntimeError, OSError, ValueError) as exc:
-        p.exit(2, 'Offline hive edit stopped: '+str(exc)+'\n')
+        p.exit(2, f'Offline hive edit stopped ({a.mode}, {a.source.name}): '+str(exc)+'\n')
 
 
 if __name__ == '__main__':
