@@ -12,7 +12,9 @@ Both boot images additionally receive the installation package in $WinPEDriver$/
 
 ## Preserved Setup and output
 
-Microsoft Setup executables, startnet.cmd and winpeshl.ini are not replaced. Readback verifies the original startup files. The output retains both boot images with index 2 bootable and writes a single sources/install.wim, even when the input uses install.esd. All Windows editions and nested recovery images receive their matching driver preparation.
+Microsoft Setup executables, startnet.cmd and winpeshl.ini are not replaced. The builder inventories both boot images before driver preparation, then verifies the original startup files after integration. Optional startup files that were absent must remain absent; existing files must retain their exact contents. The original sources/setup.exe remains required in boot image 2. Presence and hashes are saved in the build report; read errors still stop the build. The output retains both boot images with index 2 bootable and writes a single sources/install.wim, even when the input uses install.esd. All Windows editions and nested recovery images receive their matching driver preparation.
+
+Version 2.1.2 incorrectly required winpeshl.ini in boot image 2. Version 2.1.3 accepts its absence without adding a replacement script. Microsoft documents the [Windows PE startup behavior when winpeshl.ini is absent](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/winpe-create-apps?view=windows-11).
 
 The original Microsoft EFI loader and boot-image file remain. No Raspberry Pi firmware archive, RPI_EFI.fd, custom setup executable, answer file, diskpart plan or formatting script is added. Original storage automount/SAN policies are retained.
 

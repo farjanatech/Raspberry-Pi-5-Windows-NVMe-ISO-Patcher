@@ -32,8 +32,27 @@ class BuildGuards(unittest.TestCase):
             with self.subTest(path=path), self.assertRaisesRegex(StudioError, 'original ISO'):
                 builder.source_members(listing(files+[(path, 10)]))
 
+    def test_startup_inventory_errors_are_not_treated_as_absent_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job = builder.Build(); job.root = Path(tmp); job.tools = {'wimlib': 'wimlib-imagex'}
+            with patch.object(job.runner, 'run', side_effect=StudioError('unreadable WIM')):
+                with self.assertRaisesRegex(StudioError, 'unreadable WIM'):
+                    job.setup_snapshot(Path(tmp)/'boot.wim', 'originals')
+            with patch.object(job.runner, 'run', return_value=b'not a WIM listing\n'):
+                with self.assertRaisesRegex(StudioError, 'Invalid boot image file listing'):
+                    job.setup_snapshot(Path(tmp)/'boot.wim', 'originals')
 
-def original_fixture(root):
+    def test_existing_startup_file_read_errors_are_not_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job = builder.Build(); job.root = Path(tmp); job.tools = {'wimlib': 'wimlib-imagex'}
+            files = b'/\n/Windows/System32\n/Windows/System32/startnet.cmd\n'
+            with patch.object(job.runner, 'run', return_value=files), \
+                    patch.object(job, 'extract', side_effect=StudioError('file read failed')):
+                with self.assertRaisesRegex(StudioError, 'file read failed'):
+                    job.setup_snapshot(Path(tmp)/'boot.wim', 'originals')
+
+
+def original_fixture(root, missing_startup=()):
     synthetic_iso(root)
     _, inf, profile, _ = package_fixture()
     tree = root/'image'
@@ -44,6 +63,8 @@ def original_fixture(root):
     (tree/'Windows/System32/winpeshl.ini').write_bytes(b'[LaunchApp]\r\nAppPath=X:\\sources\\setup.exe\r\n')
     (tree/'sources').mkdir()
     (tree/'sources/setup.exe').write_bytes(b'ORIGINAL SETUP PLACEHOLDER')
+    for name in missing_startup:
+        (tree/name).unlink()
     (root/'media/setup.exe').write_bytes(b'ORIGINAL ROOT SETUP PLACEHOLDER')
     (root/'media/sources/setup.exe').write_bytes(b'ORIGINAL ISO SETUP PLACEHOLDER')
     (root/'media/support').mkdir()
@@ -67,8 +88,17 @@ def original_fixture(root):
 @unittest.skipUnless(native_ready(), 'Requires native Linux image tools and hivex')
 class NativePreparedISO(unittest.TestCase):
     def test_setup_preserved_all_images_signed_and_wor_layout(self):
+        self.check_prepared_iso()
+
+    def test_setup_without_winpeshl_ini_builds_without_adding_it(self):
+        self.check_prepared_iso(('Windows/System32/winpeshl.ini',))
+
+    def test_setup_without_optional_startup_scripts_preserves_absence(self):
+        self.check_prepared_iso(('Windows/System32/winpeshl.ini', 'Windows/System32/startnet.cmd'))
+
+    def check_prepared_iso(self, missing_startup=()):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp); source, profile = original_fixture(root)
+            root = Path(tmp); source, profile = original_fixture(root, missing_startup)
             before = hashlib.sha256(source.read_bytes()).hexdigest()
             job = builder.Build(); out = root/'finished.iso'
             result = job.run(source, out, profiles=[profile])
@@ -94,9 +124,19 @@ class NativePreparedISO(unittest.TestCase):
                 path.write_bytes(run('7z', 'x', '-so', '-bd', '-y', '-spd', '--', out, files[name]['path']))
             self.assertEqual(builder.boot_index(boot), 2)
             for index in (1, 2):
+                members = run('wimlib-imagex', 'dir', boot, index).decode().replace('\\', '/').splitlines()
                 for name in ('Windows/System32/startnet.cmd', 'Windows/System32/winpeshl.ini', 'sources/setup.exe'):
-                    self.assertEqual(run('wimlib-imagex', 'extract', boot, index, '/'+name, '--to-stdout'),
-                                     (root/'image'/name).read_bytes())
+                    record = next(r for r in result['microsoft_setup_originals']
+                                  if r['image_index'] == index and r['path'] == '/'+name)
+                    if name in missing_startup:
+                        self.assertNotIn('/'+name, members)
+                        self.assertFalse(record['present'])
+                        self.assertIsNone(record['sha256'])
+                    else:
+                        expected = (root/'image'/name).read_bytes()
+                        self.assertEqual(run('wimlib-imagex', 'extract', boot, index, '/'+name, '--to-stdout'), expected)
+                        self.assertTrue(record['present'])
+                        self.assertEqual(record['sha256'], hashlib.sha256(expected).hexdigest())
                 for folder in ('$WinPEDriver$/Pi5NVMe', 'drivers/Pi5NVMe', 'Windows/Drivers/Pi5NVMe'):
                     for name in ('pi5nvme.sys', 'pi5nvme.inf', 'pi5nvme.cat', 'local-test-certificate.cer'):
                         self.assertTrue(run('wimlib-imagex', 'extract', boot, index, '/'+folder+'/'+name, '--to-stdout'))
@@ -126,6 +166,17 @@ print(json.dumps({'image':h.text(h.get(system,r'ControlSet001\Services\stornvme'
                     self.assertTrue(run('wimlib-imagex', 'extract', image, image_index,
                                         '/Windows/System32/drivers/pi5nvme.sys', '--to-stdout'))
 
+    def test_missing_setup_executable_stops_before_signing_or_publication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source, profile = original_fixture(root, ('sources/setup.exe',))
+            before = hashlib.sha256(source.read_bytes()).hexdigest()
+            job = builder.Build(); out = root/'out.iso'
+            with self.assertRaisesRegex(StudioError, 'Setup executable is missing'):
+                job.run(source, out, profiles=[profile])
+            self.assertFalse(out.exists())
+            self.assertFalse((job.root/'signed').exists())
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+
     def test_unknown_driver_stops_without_publishing_an_iso(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); source, _ = original_fixture(root)
@@ -135,3 +186,40 @@ print(json.dumps({'image':h.text(h.get(system,r'ControlSet001\Services\stornvme'
             self.assertTrue((job.root/'build.log').is_file())
             self.assertEqual(json.loads((job.root/'build-report.json').read_text())['status'], 'FAILED')
             self.assertFalse((job.root/'private-keys').exists())
+
+
+@unittest.skipUnless(shutil.which('wimlib-imagex'), 'Requires native wimlib')
+class NativeStartupPreservation(unittest.TestCase):
+    def test_optional_presence_is_tracked_per_image_and_changes_are_rejected(self):
+        cases = (
+            (1, 'add', '/Windows/System32/winpeshl.ini'),
+            (2, 'delete', '/Windows/System32/winpeshl.ini'),
+            (2, 'add', '/sources/setup.exe'),
+            (1, 'delete', '/Windows/System32/startnet.cmd'),
+        )
+        for index, operation, member in cases:
+            with self.subTest(index=index, operation=operation, member=member), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); tree = root/'image'; boot = root/'boot.wim'
+                system = tree/'Windows/System32'; system.mkdir(parents=True)
+                (system/'startnet.cmd').write_bytes(b'wpeinit\r\n')
+                capture(tree, boot, 'Synthetic PE')
+                (system/'winpeshl.ini').write_bytes(b'Original shell settings')
+                (tree/'sources').mkdir(); (tree/'sources/setup.exe').write_bytes(b'Original setup')
+                capture(tree, boot, 'Synthetic Setup', append=True)
+                job = builder.Build(); job.root = root; job.tools = {'wimlib': shutil.which('wimlib-imagex')}
+                original = job.setup_snapshot(boot, 'originals')
+                self.assertIsNone(original[1, '/Windows/System32/winpeshl.ini'])
+                self.assertIsNotNone(original[2, '/Windows/System32/winpeshl.ini'])
+                replacement = root/'replacement'; replacement.write_bytes(b'Unexpected startup change')
+                command = ('add '+builder.quoted(replacement)+' '+builder.quoted(member)
+                           if operation == 'add' else 'delete '+builder.quoted(member))
+                run('wimlib-imagex', 'update', boot, index, '--command='+command)
+                with self.assertRaisesRegex(StudioError, 'Original Microsoft Setup file changed'):
+                    job.verify_setup(boot, original)
+
+    def test_corrupt_boot_wim_is_not_treated_as_optional_file_absence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); boot = root/'broken.wim'; boot.write_bytes(b'Not a WIM')
+            job = builder.Build(); job.root = root; job.tools = {'wimlib': shutil.which('wimlib-imagex')}
+            with self.assertRaises(StudioError):
+                job.setup_snapshot(boot, 'originals')

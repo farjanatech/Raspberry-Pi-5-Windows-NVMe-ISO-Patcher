@@ -115,6 +115,36 @@ class Build:
         self.extract(wim, index, '/Windows/System32/drivers/stornvme.sys', folder/'stornvme.sys', 64*MIB)
         self.extract(wim, index, '/Windows/INF/stornvme.inf', folder/'stornvme.inf', 4*MIB)
 
+    def setup_snapshot(self, wim, folder):
+        """Record original startup content and absence without assuming a shell layout."""
+        snapshot = {}
+        for index in (1, 2):
+            # Inventory first: extraction, corruption and I/O errors must never
+            # be mistaken for an optional file being absent.
+            listing = self.runner.run([self.tools['wimlib'], 'dir', str(wim), str(index)])
+            members = {line.replace('\\', '/').casefold()
+                       for line in listing.decode('utf-8', 'strict').splitlines()}
+            need('/' in members and '/windows/system32' in members, 'Invalid boot image file listing')
+            for member in ('/Windows/System32/startnet.cmd', '/Windows/System32/winpeshl.ini',
+                           '/sources/setup.exe'):
+                present = member.casefold() in members
+                need(present or not (index == 2 and member == '/sources/setup.exe'),
+                     'Original Microsoft Setup executable is missing from boot image 2: '+member)
+                if present:
+                    path = self.root/folder/(str(index)+'-'+Path(member).name)
+                    self.extract(wim, index, member, path)
+                    snapshot[index, member] = digest(path, self.cancel)
+                else:
+                    snapshot[index, member] = None
+                    self.log(f'Boot image {index}: {member} is absent; preserving the original layout')
+        return snapshot
+
+    def verify_setup(self, wim, original):
+        current = self.setup_snapshot(wim, 'setup-readback')
+        for (index, member), expected in original.items():
+            need(current[index, member] == expected,
+                 f'Original Microsoft Setup file changed in boot image {index}: {member}')
+
     def require_programs(self, wim, index, names):
         for name in names:
             target = self.root/'program-check'/name
@@ -230,6 +260,11 @@ class Build:
             need(1 <= len(install_images) <= 31, 'Supported installation image count is 1 to 31')
             required = 3*sum(p.stat().st_size for p in session.media.values()) + 8*GIB
             need(shutil.disk_usage(self.root).free >= required, f'Building this ISO needs approximately {required/GIB:.0f} GiB free')
+            startup = self.setup_snapshot(session.media['boot'], 'setup-originals')
+            self.report['microsoft_setup_originals'] = [
+                dict(image_index=index, path=member, present=value is not None, sha256=value)
+                for (index, member), value in startup.items()]
+            self.save()
             self.stage(10, 'Collecting compatible drivers for Setup, Windows and recovery')
             (self.root/'collection').mkdir()
             for image in boot_images:
@@ -279,12 +314,6 @@ class Build:
             boot = media/'sources/boot.wim';install = media/'sources/install.wim'
             self.stage(38, 'Preparing drivers while preserving Microsoft Setup')
             shutil.copyfile(session.media['boot'], boot)
-            startup = {}
-            for index, member in ((1, '/Windows/System32/startnet.cmd'), (2, '/Windows/System32/winpeshl.ini'),
-                                  (2, '/sources/setup.exe')):
-                path = self.root/'setup-originals'/(str(index)+'-'+Path(member).name)
-                self.extract(session.media['boot'], index, member, path)
-                startup[index, member] = digest(path, self.cancel)
             for image in boot_images:
                 extras = {}
                 for name in ('pi5nvme.sys', 'pi5nvme.inf', 'pi5nvme.cat', 'local-test-certificate.cer'):
@@ -294,10 +323,7 @@ class Build:
                     extras['drivers/Pi5NVMe/'+name] = setup_package/name
                 self.update_image(boot, image.index, 'boot-'+str(image.index), extras, (setup_package,))
             need(boot_index(boot) == 2, 'Microsoft Setup boot index changed')
-            for (index, member), expected_hash in startup.items():
-                path = self.root/'setup-readback'/(str(index)+'-'+Path(member).name)
-                self.extract(boot, index, member, path)
-                need(digest(path, self.cancel) == expected_hash, 'Original Microsoft Setup file changed: '+member)
+            self.verify_setup(boot, startup)
             self.report['microsoft_setup_readback_verified'] = True
             prepared_recoveries = set()
             for n, image in enumerate(install_images):

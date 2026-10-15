@@ -1,3 +1,11 @@
+# Version 2.1.3 - preserve optional Windows PE startup files
+
+Version 2.1.2 stopped with wimlib error 49 when an original Setup image did not contain Windows/System32/winpeshl.ini. The builder now inventories both boot images before driver preparation and preserves the presence or absence of their startup files. It verifies existing content and continued absence after integration, while still requiring the original Setup executable in image 2. Inventory, extraction and corruption errors still stop the build.
+
+The build report records the original startup file presence and hashes. No startup script is created or replaced. Driver profiles, signing, test-signing configuration, all-edition/recovery preparation and the supplied icon remain unchanged.
+
+Update the installed app and rebuild from the same original ISO using a new output filename. The synthetic regression tests cover optional files present and absent, startup-file changes and incomplete or unreadable boot images. These checks do not establish a successful build of the user's exact ISO or physical Windows installation.
+
 # Version 2.1.2 - supplied icon and complete README uninstall command
 
 The app/window, GUI header, desktop and menu now use the owner's newly supplied icon, copied without altering its pixels. The existing asset path remains compatible with installation and removal.
