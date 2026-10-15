@@ -1,6 +1,6 @@
 """Exact-input static ports, not Windows/Pi hardware approvals.
 
-No Microsoft files are bundled. See docs/REAL_INPUT_REVIEW.md. The original
+No Microsoft files are bundled. See docs/DRIVER_PROVENANCE.md. The original
 helper/approach is attributed to damian5466's nvme/build.py; the upstream
 26100.9539 profile remains unchanged in the core.
 """
@@ -13,7 +13,7 @@ def _port(version, hashes, alloc, release, calls, helper, table_size, iat, guid,
     p = copy.deepcopy(BUILTIN_PROFILE)
     p.update(id=f'local-arm64-{version}-static-v1', source_version='10.0.' + version,
              source_sha256=hashes[0], inf_sha256=hashes[1], output_sha256=hashes[2],
-             provenance='https://github.com/farjanatech/rpi5-nvme-version-aware-tool/blob/a464bf9a12b47077653a2c2a8743e41b9fbd3164/docs/REAL_INPUT_REVIEW.md',
+             provenance='https://github.com/farjanatech/Raspberry-Pi-5-Windows-NVMe-ISO-Patcher/blob/v2.1.1/docs/DRIVER_PROVENANCE.md',
              runtime_evidence='Static review and reproducible build on user-supplied real input only. Windows loading, Pi 5 I/O and boot NOT TESTED.',
              inf_date='10/12/2026')
     p['edits'] = [dict(rva=r, before=struct.pack('<I', 0x52800020 | reg).hex(),

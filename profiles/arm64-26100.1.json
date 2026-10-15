@@ -5,7 +5,7 @@
   "inf_sha256": "b84c61c50731a446fc44a70deb9da9a046c6eeace16041978bfec53ee25db30e",
   "output_sha256": "b325085fa2e6d18c65c8cb800b5eb3e721b59b08d6eb2adc35f3d0a4c33d3866",
   "source_version": "10.0.26100.1",
-  "provenance": "https://github.com/farjanatech/rpi5-nvme-version-aware-tool/blob/a464bf9a12b47077653a2c2a8743e41b9fbd3164/docs/REAL_INPUT_REVIEW.md",
+  "provenance": "https://github.com/farjanatech/Raspberry-Pi-5-Windows-NVMe-ISO-Patcher/blob/v2.1.1/docs/DRIVER_PROVENANCE.md",
   "recipe_blob_sha1": "c0a207c6a0eec2e7fd19de9112ee6d308054ed06",
   "runtime_evidence": "Static review and reproducible build on user-supplied real input only. Windows loading, Pi 5 I/O and boot NOT TESTED.",
   "inf_model_section": "NVME.NTarm64",

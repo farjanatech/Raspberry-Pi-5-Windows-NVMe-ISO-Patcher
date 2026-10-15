@@ -4,7 +4,7 @@ Patch NVMe drivers in an original Windows ARM64 ISO and rebuild a modified insta
 
 **Original Windows ARM64 ISO -> patched and signed NVMe drivers -> modified installation ISO.**
 
-This is the renamed Pi5 NVMe Studio ISO builder, version 2.1.0. It preserves Microsoft Setup, both boot images, all Windows editions and recovery. It includes no Pi UEFI firmware, custom setup launcher, USB writer, disk formatter or diagnostic interface. Use a separate deployment tool such as WoR-Flasher afterward.
+This is the renamed Pi5 NVMe Studio ISO builder, version 2.1.1. It preserves Microsoft Setup, both boot images, all Windows editions and recovery. It includes no Pi UEFI firmware, custom setup launcher, USB writer, disk formatter or diagnostic interface. Use a separate deployment tool such as WoR-Flasher afterward.
 
 ## Install on Raspberry Pi OS
 

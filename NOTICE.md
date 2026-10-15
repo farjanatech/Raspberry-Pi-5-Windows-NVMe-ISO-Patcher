@@ -1,6 +1,6 @@
 # Provenance and licensing notice
 
-The existing exact-profile NVMe patch core and reviewed input ports are retained. Earlier experimental applications are not shipped. Their history remains in the previous repository: https://github.com/farjanatech/rpi5-nvme-version-aware-tool . See docs/MIGRATION.md for the imported source revision.
+The existing exact-profile NVMe patch core and reviewed input ports are retained. Earlier experimental applications are not shipped. The owner deleted the former repository after migration. This repository contains the active implementation and [recorded driver provenance](docs/DRIVER_PROVENANCE.md). See docs/MIGRATION.md for the import history.
 
 The original numerical NVMe recipe, helper bytes and reference hashes are
 attributed to damian5466/rpi5-windows-drivers `nvme/build.py`, Git blob
