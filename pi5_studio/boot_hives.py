@@ -187,14 +187,29 @@ def edit(source, output, mode):
                                                  for p,k,t,v in changes]}
 
 
+def inspect(source, mode):
+    """Validate an extracted hive without committing any changes."""
+    import hivex
+    require(mode in ('system', 'bcd', 'template'), 'Unsupported hive operation')
+    source = Path(source).absolute()
+    before = clean_hive(source)
+    hive = hivex.Hivex(str(source))
+    changes = plan_system(hive) if mode == 'system' else plan_bcd(hive, template=mode == 'template')
+    require(clean_hive(source) == before, 'Source hive changed during inspection')
+    return dict(mode=mode, source_sha256=before, preflight_verified=True, planned_changes=len(changes))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('mode', choices=['system', 'bcd', 'template'])
     p.add_argument('source', type=Path)
-    p.add_argument('output', type=Path)
+    p.add_argument('output', type=Path, nargs='?')
+    p.add_argument('--check-only', action='store_true')
     a = p.parse_args()
     try:
-        print(json.dumps(edit(a.source, a.output, a.mode), indent=2))
+        require((a.output is None) == a.check_only, 'Use an output path, or --check-only without an output path')
+        result = inspect(a.source, a.mode) if a.check_only else edit(a.source, a.output, a.mode)
+        print(json.dumps(result, indent=2))
     except (HiveError, ImportError, RuntimeError, OSError, ValueError) as exc:
         p.exit(2, f'Offline hive edit stopped ({a.mode}, {a.source.name}): '+str(exc)+'\n')
 

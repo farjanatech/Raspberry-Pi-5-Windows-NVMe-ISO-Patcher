@@ -4,6 +4,8 @@ Run Raspberry Pi 5 Windows NVMe ISO Patcher on 64-bit Raspberry Pi OS Desktop. C
 
 ## Driver preparation
 
+Before generating signing keys or preparing output images, the builder validates the original EFI loader, ISO BCD, SYSTEM and SOFTWARE hives from boot/Windows/recovery, and every Windows edition's BCD template. Extracted hives are reused during integration, so early validation does not require another extraction. It is a compatibility check of these layouts, not proof that Windows will boot. A failure retains the original error even if saving its report also fails.
+
 The existing patch recipes and signing code remain intact. Each original SYS/INF pair from both boot images, every Windows edition and each distinct recovery image must match a reviewed profile. Unknown versions are rejected rather than patched at guessed offsets. Each resulting package contains pi5nvme.sys, pi5nvme.inf, pi5nvme.cat and its public test certificate. Original stornvme.sys, its original package, and the image's existing storport/auxiliary components are preserved.
 
 The SYSTEM hive retains the established boot-service redirection to the signed alternate binary. The complete matching package is copied to Windows/Drivers/Pi5NVMe, appended to Windows DevicePath, and its certificate is added to the extracted image's ROOT and TrustedPublisher stores. The host's trust stores are never modified. This follows Microsoft's [preloaded-package discovery mechanism](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/preloading-driver-packages); it does not claim native offline DISM servicing on Linux.
@@ -23,6 +25,8 @@ Test-signing is set in the ISO's EFI boot BCD and each Windows edition's BCD tem
 The ISO boot store and the Windows deployment template have separate validation rules. The actual ISO boot entry must identify an EFI WinPE loader. In `BCD-Template`, typed Windows OS loader objects can omit the application-path element (`12000002`) or retain standard EFI/BIOS loader defaults. Missing paths are not fabricated, existing paths and unrelated settings are retained, and test-signing is enabled on the Windows loader and boot-manager objects. Present but malformed path values still stop the build. [BCDBoot uses the template to construct the deployed boot store](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/bcdboot-command-line-options-techref-di?view=windows-11).
 
 WIM integrity, signed package membership, changed-file readback, original Setup files, final ISO contents and original-input identity are checked before the new output is published. Private keys are deleted after signing and never placed in the ISO or public CI.
+
+Transaction logs are removed only for hives actually edited in that image. Boot/recovery BCD templates and their logs remain intact. Large working-file copies check cancellation and free space between blocks. The output is never overwritten; if an error occurs after publication, the error message identifies the already verified ISO instead of deleting it. A fresh output name is required for another build.
 
 ## Limits
 

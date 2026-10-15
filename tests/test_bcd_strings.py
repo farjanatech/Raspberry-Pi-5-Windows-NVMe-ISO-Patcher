@@ -195,6 +195,19 @@ walk(h.root(),'');print(json.dumps(out,sort_keys=True))
 
 @unittest.skipUnless(hivex_ready(), 'Requires system python3-hivex; no Windows hive is bundled')
 class NativeBcdStringTests(unittest.TestCase):
+    def test_preflight_does_not_write_or_modify_any_hive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); run('/usr/bin/python3',bt.ROOT/'tests/make_boot_fixtures.py',root)
+            before={p.name:p.read_bytes() for p in root.iterdir()}
+            for mode,name in (('system','SYSTEM'),('bcd','BCD'),('template','BCD-TEMPLATE')):
+                result=json.loads(run('/usr/bin/python3',bt.ROOT/'pi5_studio/boot_hives.py',
+                                      mode,root/name,'--check-only'))
+                self.assertTrue(result['preflight_verified'])
+            result=json.loads(run('/usr/bin/python3',bt.ROOT/'pi5_studio/driver_hives.py',
+                                  root/'SOFTWARE','--check-only'))
+            self.assertTrue(result['preflight_verified'])
+            self.assertEqual(before,{p.name:p.read_bytes() for p in root.iterdir()})
+
     def test_template_commit_preserves_missing_paths_and_every_unrelated_value(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

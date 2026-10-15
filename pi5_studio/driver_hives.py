@@ -66,10 +66,29 @@ def edit(source, output, certificates):
                 certificates_sha256=[hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in certificates])
 
 
+def inspect(source):
+    """Check the original DevicePath and hive without needing signing keys."""
+    import hivex
+    source = Path(source)
+    before = hives.clean_hive(source)
+    hive = hivex.Hivex(str(source))
+    plan_software(hive, [])
+    hives.require(hives.clean_hive(source) == before, 'Source SOFTWARE hive changed during inspection')
+    return dict(mode='software', source_sha256=before, preflight_verified=True)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
-    parser.add_argument('output', type=Path)
-    parser.add_argument('certificates', type=Path, nargs='+')
+    parser.add_argument('output', type=Path, nargs='?')
+    parser.add_argument('certificates', type=Path, nargs='*')
+    parser.add_argument('--check-only', action='store_true')
     args = parser.parse_args()
-    print(json.dumps(edit(args.source, args.output, args.certificates)))
+    if args.check_only:
+        if args.output is not None or args.certificates:
+            parser.error('--check-only does not accept an output or certificates')
+        print(json.dumps(inspect(args.source)))
+    else:
+        if args.output is None or not args.certificates:
+            parser.error('An output path and at least one certificate are required')
+        print(json.dumps(edit(args.source, args.output, args.certificates)))

@@ -1,3 +1,11 @@
+# Version 2.1.5 - ISO pipeline audit fixes
+
+Registry compatibility checks now run for every boot, Windows and recovery environment before signing or image integration. The ISO BCD and EFI loader are also validated early. Cached hive extracts are reused, and only transaction logs belonging to edited hives are removed; unchanged boot/recovery BCD templates retain their logs.
+
+Large working-file copies now respond to cancellation and stop when space is nearly exhausted. Unsupported output-path quoting is rejected before extraction. Failure handling preserves the original error when report or cleanup writes also fail, identifies any ISO already verified and published, and no longer claims that a missing log was saved. Automatic build progress no longer asks the user to perform a retired manual edition-selection step.
+
+Regression coverage adds solid install.esd input, different recovery images per edition, Unicode output folders, read-only hive preflight, unchanged transaction-log preservation, copy cancellation/low-space checks, GUI failures without logs, and report-write failures after ISO publication. Existing patch profiles and test-signing remain unchanged. These are software checks; they cannot guarantee arbitrary Windows versions or hardware installation.
+
 # Version 2.1.4 - handle deployment BCD templates separately from boot stores
 
 The offline hive editor incorrectly required an explicit EFI application path in every Windows loader object of BCD-Template. This produced a missing Elements/12000002 error for a template entry such as {7254a080-1510-4e85-ac0f-e7fb3d444736}.

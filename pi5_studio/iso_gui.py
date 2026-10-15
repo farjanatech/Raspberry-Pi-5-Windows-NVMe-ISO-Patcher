@@ -190,11 +190,12 @@ class Window(QMainWindow):
 
     @Slot(str)
     def on_failure(self, message):
-        if self.worker and self.worker.builder.root:
-            self.log_directory = self.worker.builder.root
-            self.log_button.show()
+        root = self.worker.builder.root if self.worker else None
+        self.log_directory = root if root and (root/'build.log').is_file() else None
+        self.log_button.setVisible(self.log_directory is not None)
         self.status.setText('Build cancelled. Your source is unchanged.' if self.cancel.event.is_set()
-                            else 'Build stopped. Details have been saved in the log.')
+                            else 'Build stopped. Details have been saved in the log.' if self.log_directory
+                            else 'Build stopped before a log could be created. See the error message.')
         if not self.cancel.event.is_set():
             QMessageBox.warning(self, 'ISO build stopped', message)
 

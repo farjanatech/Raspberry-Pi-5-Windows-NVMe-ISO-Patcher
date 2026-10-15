@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
@@ -37,6 +38,24 @@ class SimpleStudioGUI(unittest.TestCase):
             self.assertTrue(window.build_button.isEnabled())
         finally:
             window.close()
+
+    def test_early_failure_does_not_claim_a_nonexistent_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            window=Window(); root=Path(tmp)
+            window.worker=SimpleNamespace(builder=SimpleNamespace(root=root))
+            try:
+                with patch('pi5_studio.iso_gui.QMessageBox.warning'):
+                    window.on_failure('No write access')
+                    self.assertIsNone(window.log_directory)
+                    self.assertTrue(window.log_button.isHidden())
+                    self.assertIn('before a log could be created',window.status.text())
+                    (root/'build.log').write_text('Saved error')
+                    window.on_failure('Saved error')
+                    self.assertEqual(window.log_directory,root)
+                    self.assertFalse(window.log_button.isHidden())
+                    self.assertIn('saved in the log',window.status.text())
+            finally:
+                window.worker=None; window.close()
 
     def test_worker_completion_returns_controls_and_reports_output(self):
         with tempfile.TemporaryDirectory() as tmp:

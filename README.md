@@ -4,7 +4,7 @@ Patch NVMe drivers in an original Windows ARM64 ISO and rebuild a modified insta
 
 **Original Windows ARM64 ISO -> patched and signed NVMe drivers -> modified installation ISO.**
 
-This is the renamed Pi5 NVMe Studio ISO builder, version 2.1.4. It preserves Microsoft Setup, both boot images, all Windows editions and recovery. It includes no Pi UEFI firmware, custom setup launcher, USB writer, disk formatter or diagnostic interface. Use a separate deployment tool such as WoR-Flasher afterward.
+This is the renamed Pi5 NVMe Studio ISO builder, version 2.1.5. It preserves Microsoft Setup, both boot images, all Windows editions and recovery. It includes no Pi UEFI firmware, custom setup launcher, USB writer, disk formatter or diagnostic interface. Use a separate deployment tool such as WoR-Flasher afterward.
 
 ## Install on Raspberry Pi OS
 
@@ -26,6 +26,8 @@ The original ISO is never overwritten. Progress, a background log and a build re
 Version 2.1.3 fixes the `winpeshl.ini does not exist in WIM image 2` build error. Original media may omit this optional startup file; the patcher preserves that absence instead of requiring or creating it. Update and reopen the app before rebuilding from the original ISO.
 
 Version 2.1.4 also fixes the `BCD-Template` registry error ending in `Elements\12000002`. Deployment templates may omit a loader path or contain defaults for multiple firmware types. The patcher preserves these entries while enabling test-signing; the ISO's actual boot store still requires a valid EFI WinPE loader.
+
+Version 2.1.5 checks every required registry hive before signing or image integration, preserves transaction logs for unchanged hives, and allows cancellation during large working-file copies. Unsupported output-path characters are rejected early. Error messages distinguish missing logs from saved logs and identify an ISO already verified and saved before a later reporting failure.
 
 ## Uninstall
 

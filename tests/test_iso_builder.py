@@ -7,13 +7,53 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pi5_studio import iso_builder as builder
-from pi5_studio.backend import StudioError
+from pi5_studio.backend import StudioError, Cancellation, Cancelled, MIB
 from tests.image_fixtures import native_ready, synthetic_iso, run, listing
 from tests.test_native_tools import capture
 from tests.test_catalog_packages import package_fixture
 from tests.test_bcd_strings import DUMP
 
 class BuildGuards(unittest.TestCase):
+    def test_unrepresentable_output_paths_stop_before_work_starts(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(builder.sys, 'platform', 'linux'):
+            root = Path(tmp); source = root/'original.iso'; source.write_bytes(b'unchanged source')
+            # Backslash is a path separator on Windows, so exercise the WIM
+            # grammar through a filename containing a double quote instead.
+            job = builder.Build()
+            with patch.object(builder, 'prerequisites') as prerequisites:
+                with self.assertRaisesRegex(StudioError, 'Unsupported quote/backslash'):
+                    job.run(source, root/'bad"output.iso')
+                prerequisites.assert_not_called()
+            self.assertIsNone(job.root)
+            self.assertEqual(list(root.iterdir()), [source])
+
+    def test_copy_cancels_between_blocks_and_never_overwrites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source = root/'large.wim'; source.write_bytes(b'A'*(9*MIB))
+            target = root/'copy.wim'; token = Cancellation(); checks = 0
+            original_check = token.check
+            def cancel_after_one_block():
+                nonlocal checks
+                checks += 1
+                if checks == 3: token.cancel()
+                original_check()
+            with patch.object(token, 'check', side_effect=cancel_after_one_block):
+                with self.assertRaises(Cancelled): builder.copy_file(source, target, token)
+            self.assertEqual(target.stat().st_size, 4*MIB)
+            self.assertEqual(source.stat().st_size, 9*MIB)
+            with self.assertRaises(FileExistsError): builder.copy_file(source, target, Cancellation())
+            self.assertEqual(target.stat().st_size, 4*MIB)
+
+    def test_copy_low_space_stops_before_writing_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source = root/'original'; source.write_bytes(b'original data')
+            target = root/'copy'
+            with patch.object(builder.shutil, 'disk_usage', return_value=type('Usage', (), {'free': 0})()):
+                with self.assertRaisesRegex(StudioError, 'nearly full'):
+                    builder.copy_file(source, target, Cancellation())
+            self.assertEqual(target.stat().st_size, 0)
+            self.assertEqual(source.read_bytes(), b'original data')
+
     def test_existing_paths_are_never_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(builder.sys, 'platform', 'linux'):
             p, out = Path(tmp)/'input.iso', Path(tmp)/'existing.iso'
@@ -53,13 +93,18 @@ class BuildGuards(unittest.TestCase):
                     job.setup_snapshot(Path(tmp)/'boot.wim', 'originals')
 
 
-def original_fixture(root, missing_startup=()):
+def original_fixture(root, missing_startup=(), *, esd=False, distinct_recovery=False, bad_template=False):
     synthetic_iso(root)
     _, inf, profile, _ = package_fixture()
     tree = root/'image'
     (tree/'Windows/INF/stornvme.inf').write_bytes(inf)
     shutil.copyfile(root/'hives/SOFTWARE', tree/'Windows/System32/config/SOFTWARE')
     shutil.copyfile(root/'hives/BCD-TEMPLATE', tree/'Windows/System32/config/BCD-Template')
+    if bad_template:
+        (tree/'Windows/System32/config/BCD-Template').write_bytes(b'Invalid registry hive')
+    for hive in ('SYSTEM', 'SOFTWARE', 'BCD-Template'):
+        for suffix in ('.LOG', '.LOG1', '.LOG2'):
+            (tree/'Windows/System32/config'/(hive+suffix)).write_bytes(b'Original '+(hive+suffix).encode())
     (tree/'Windows/System32/startnet.cmd').write_bytes(b'wpeinit\r\n')
     (tree/'Windows/System32/winpeshl.ini').write_bytes(b'[LaunchApp]\r\nAppPath=X:\\sources\\setup.exe\r\n')
     (tree/'sources').mkdir()
@@ -79,7 +124,16 @@ def original_fixture(root, missing_startup=()):
     shutil.copyfile(recovery, tree/'Windows/System32/Recovery/winre.wim')
     install = root/'media/sources/install.wim'; install.unlink()
     capture(tree, install, 'Synthetic Windows Pro')
+    if distinct_recovery:
+        other_tree = root/'other-recovery'
+        shutil.copytree(tree, other_tree, ignore=shutil.ignore_patterns('Recovery'))
+        (other_tree/'edition-marker.txt').write_bytes(b'Home recovery')
+        other_wim = root/'other-recovery.wim'; capture(other_tree, other_wim, 'Home recovery')
+        shutil.copyfile(other_wim, tree/'Windows/System32/Recovery/winre.wim')
     capture(tree, install, 'Synthetic Windows Home', append=True)
+    if esd:
+        run('wimlib-imagex', 'export', install, 'all', root/'media/sources/install.esd', '--compress=LZMS', '--solid')
+        install.unlink()
     source = root/'input.iso'
     run('xorriso', '-as', 'mkisofs', '-iso-level', '3', '-J', '-R', '-e',
         'efi/microsoft/boot/efisys.bin', '-no-emul-boot', '-o', source, root/'media')
@@ -97,16 +151,29 @@ class NativePreparedISO(unittest.TestCase):
     def test_setup_without_optional_startup_scripts_preserves_absence(self):
         self.check_prepared_iso(('Windows/System32/winpeshl.ini', 'Windows/System32/startnet.cmd'))
 
-    def check_prepared_iso(self, missing_startup=()):
+    def test_solid_esd_with_distinct_recoveries_in_unicode_folder(self):
+        self.check_prepared_iso(esd=True, distinct_recovery=True, unicode_folder=True)
+
+    def check_prepared_iso(self, missing_startup=(), *, esd=False, distinct_recovery=False, unicode_folder=False):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp); source, profile = original_fixture(root, missing_startup)
+            root = Path(tmp)
+            if unicode_folder:
+                root = root/'Pi images - বাংলা'; root.mkdir()
+            source, profile = original_fixture(root, missing_startup, esd=esd, distinct_recovery=distinct_recovery)
             before = hashlib.sha256(source.read_bytes()).hexdigest()
-            job = builder.Build(); out = root/'finished.iso'
+            progress = []
+            job = builder.Build(notify=lambda p,t: progress.append((p,t))); out = root/'finished.iso'
             result = job.run(source, out, profiles=[profile])
             self.assertEqual(result['status'], 'DRIVER_PREPARED_ISO_BUILT')
             self.assertTrue(result['final_iso_readback_verified'])
             self.assertTrue(result['microsoft_setup_readback_verified'])
             self.assertEqual(len(result['editions']), 2)
+            self.assertFalse(any('Select a Windows edition' in t for _,t in progress))
+            self.assertEqual(len(result['hive_preflight']), 14)
+            self.assertTrue(result['bcd_preflight']['preflight_verified'])
+            self.assertTrue(all(r['preflight_verified'] for r in result['hive_preflight']))
+            edited_recoveries = {r['environment'] for r in result['hives'] if r['environment'].startswith('recovery-')}
+            self.assertEqual(len(edited_recoveries), 2 if distinct_recovery else 1)
             for field in ('windows_installation_verified', 'custom_setup_included', 'custom_firmware_included'):
                 self.assertFalse(result[field])
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
@@ -168,6 +235,16 @@ print(json.dumps({'image':h.text(h.get(system,r'ControlSet001\Services\stornvme'
                 self.assertEqual({p:v for p,v in template_before.items() if v},
                                  {p:v for p,v in template_after.items() if v})
                 for image, image_index in ((boot, index), (install, index), (recovery, 1)):
+                    members = run('wimlib-imagex', 'dir', image, image_index).decode().replace('\\', '/').splitlines()
+                    for hive in ('SYSTEM', 'SOFTWARE', 'BCD-Template'):
+                        for suffix in ('.LOG', '.LOG1', '.LOG2'):
+                            member = '/Windows/System32/config/'+hive+suffix
+                            if hive == 'BCD-Template' and image != install:
+                                self.assertIn(member, members)
+                                self.assertEqual(run('wimlib-imagex', 'extract', image, image_index, member, '--to-stdout'),
+                                                 b'Original '+(hive+suffix).encode())
+                            else:
+                                self.assertNotIn(member, members)
                     hives = []
                     for name in ('SYSTEM', 'SOFTWARE'):
                         path = root/name; path.write_bytes(run('wimlib-imagex', 'extract', image, image_index,
@@ -179,6 +256,33 @@ print(json.dumps({'image':h.text(h.get(system,r'ControlSet001\Services\stornvme'
                     self.assertIn(r'%SystemRoot%\Drivers\Pi5NVMe', state['device_path'])
                     self.assertTrue(run('wimlib-imagex', 'extract', image, image_index,
                                         '/Windows/System32/drivers/pi5nvme.sys', '--to-stdout'))
+
+    def test_bad_template_fails_before_signing_or_media_preparation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source, profile=original_fixture(root, bad_template=True)
+            before=hashlib.sha256(source.read_bytes()).hexdigest(); job=builder.Build()
+            with patch.object(builder, 'build_collection') as sign:
+                with self.assertRaisesRegex(StudioError, 'Hive size'):
+                    job.run(source, root/'out.iso', profiles=[profile])
+                sign.assert_not_called()
+            self.assertFalse((job.root/'media').exists())
+            self.assertFalse((job.root/'private-keys').exists())
+            self.assertFalse((root/'out.iso').exists())
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),before)
+
+    def test_post_publication_report_failure_keeps_the_verified_iso(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source, profile=original_fixture(root); out=root/'finished.iso'
+            job=builder.Build(); save=job.save
+            def save_until_published():
+                if out.exists(): raise OSError('Simulated report storage failure')
+                save()
+            with patch.object(job, 'save', side_effect=save_until_published):
+                with self.assertRaisesRegex(StudioError, 'verified ISO was already saved'):
+                    job.run(source,out,profiles=[profile])
+            self.assertTrue(out.is_file())
+            self.assertTrue(job.report['verified_output_published'])
+            self.assertEqual(hashlib.sha256(out.read_bytes()).hexdigest(),job.report['iso_sha256'])
 
     def test_missing_setup_executable_stops_before_signing_or_publication(self):
         with tempfile.TemporaryDirectory() as tmp:

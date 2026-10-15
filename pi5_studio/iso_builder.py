@@ -26,6 +26,22 @@ from .packages import build_collection, native_versions, safe_path
 CONTROLLER_ID = r'PCI\VEN_1E4B&DEV_1202'
 
 
+def copy_file(source, target, cancel):
+    """Bounded, cancellable copies of large WIMs into new working files."""
+    cancel.check()
+    identity = file_identity(source)
+    with Path(source).open('rb') as incoming, Path(target).open('xb') as outgoing:
+        while True:
+            cancel.check()
+            block = incoming.read(4*MIB)
+            if not block:
+                break
+            need(shutil.disk_usage(target.parent).free >= len(block)+128*MIB,
+                 'Workspace is nearly full. Choose a larger output drive.')
+            outgoing.write(block)
+    need(file_identity(source) == identity, 'A working input changed during copying')
+
+
 def publish_iso(pending, output):
     """Atomic no-replace publication, including exFAT output drives."""
     libc = ctypes.CDLL(None, use_errno=True)
@@ -157,15 +173,26 @@ class Build:
     def package(self, environment):
         return self.root / 'signed/packages' / self.package_by_environment[environment]['package_name']
 
+    def preflight_hives(self, wim, index, environment):
+        modes = [('SYSTEM', 'system'), ('SOFTWARE', 'software')]
+        if environment.startswith('install-'):
+            modes.append(('BCD-Template', 'template'))
+        for name, mode in modes:
+            original = self.root/'hives'/(environment+'.'+name)
+            self.extract(wim, index, '/Windows/System32/config/'+name, original)
+            command = ([SYSTEM_PYTHON, str(ROOT/'pi5_studio/driver_hives.py')] if mode == 'software' else
+                       [SYSTEM_PYTHON, str(ROOT/'pi5_studio/boot_hives.py'), mode])
+            result = json.loads(self.runner.run(command+[str(original), '--check-only']))
+            self.report.setdefault('hive_preflight', []).append(dict(environment=environment, **result))
+
     def update_image(self, wim, index, environment, extra=None, trust_packages=()):
         """Inject only an alternate driver, checked hive and explicit payloads."""
         layer = self.root / 'layers' / environment
         driver = layer / 'Windows/System32/drivers/pi5nvme.sys'
         driver.parent.mkdir(parents=True)
         package = self.package(environment)
-        shutil.copyfile(package/'pi5nvme.sys', driver)
+        copy_file(package/'pi5nvme.sys', driver, self.cancel)
         original = self.root / 'hives' / (environment+'.SYSTEM')
-        self.extract(wim, index, '/Windows/System32/config/SYSTEM', original)
         target = layer / 'Windows/System32/config/SYSTEM'
         target.parent.mkdir(parents=True)
         result = json.loads(self.runner.run([SYSTEM_PYTHON, str(ROOT/'pi5_studio/boot_hives.py'),
@@ -174,9 +201,8 @@ class Build:
         pkgdir = layer/'Windows/Drivers/Pi5NVMe'
         pkgdir.mkdir(parents=True)
         for name in ('pi5nvme.sys', 'pi5nvme.inf', 'pi5nvme.cat', 'local-test-certificate.cer'):
-            shutil.copyfile(package/name, pkgdir/name)
+            copy_file(package/name, pkgdir/name, self.cancel)
         software = self.root/'hives'/(environment+'.SOFTWARE')
-        self.extract(wim, index, '/Windows/System32/config/SOFTWARE', software)
         software_out = layer/'Windows/System32/config/SOFTWARE'
         result = json.loads(self.runner.run([SYSTEM_PYTHON, str(ROOT/'pi5_studio/driver_hives.py'),
                                              str(software), str(software_out),
@@ -185,7 +211,6 @@ class Build:
         self.report['hives'].append(dict(environment=environment, **result))
         if environment.startswith('install-'):
             template = self.root/'hives'/(environment+'.BCD-Template')
-            self.extract(wim, index, '/Windows/System32/config/BCD-Template', template)
             template_out = layer/'Windows/System32/config/BCD-Template'
             result = json.loads(self.runner.run([SYSTEM_PYTHON, str(ROOT/'pi5_studio/boot_hives.py'),
                                                  'template', str(template), str(template_out)]))
@@ -194,13 +219,14 @@ class Build:
             dest = layer/name
             dest.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(value, Path):
-                shutil.copyfile(value, dest)
+                copy_file(value, dest, self.cancel)
             else:
                 dest.write_bytes(value)
         command = self.root / ('update-'+environment+'.txt')
+        changed_hives = ('SYSTEM', 'SOFTWARE', 'BCD-Template') if environment.startswith('install-') else ('SYSTEM', 'SOFTWARE')
         command.write_text('add '+quoted(layer)+' /\n'+''.join(
             'delete --force '+quoted('/Windows/System32/config/'+hive+suffix)+'\n'
-            for hive in ('SYSTEM', 'SOFTWARE', 'BCD-Template') for suffix in ('.LOG', '.LOG1', '.LOG2')), encoding='utf-8')
+            for hive in changed_hives for suffix in ('.LOG', '.LOG1', '.LOG2')), encoding='utf-8')
         self.runner.run([self.tools['wimlib'], 'update', str(wim), str(index), '--check', '--threads=2'], stdin_path=command)
         # Read every changed file out of the WIM, including nested recovery WIMs.
         check = self.root/'readback'
@@ -223,6 +249,9 @@ class Build:
         need(source.suffix.lower() == '.iso' and output.suffix.lower() == '.iso', 'Choose input and output .iso paths')
         need(output.parent.is_dir() and not output.exists() and source != output,
              'Choose a new output filename; an existing ISO is never overwritten')
+        # Reject paths the WIM command-file grammar cannot represent before
+        # extraction/signing, rather than failing at the first image update.
+        quoted(output)
         identity = file_identity(source)
         self.root = output.parent / ('.'+output.stem+'-build-'+uuid.uuid4().hex[:10])
         self.root.mkdir(mode=0o700)
@@ -249,6 +278,8 @@ class Build:
             def inspection_progress(stage, percent, detail):
                 self.log(detail)
                 if percent >= 0:
+                    if percent == 100:
+                        detail = 'Windows images inspected; checking original Setup files'
                     self.notify(3+int(percent*7/100), detail)
             session = Session(self.cancel, inspection_progress, runner=self.runner)
             session.inspect(source, self.root)
@@ -265,6 +296,14 @@ class Build:
                 dict(image_index=index, path=member, present=value is not None, sha256=value)
                 for (index, member), value in startup.items()]
             self.save()
+            original_bcd = self.root/'original-BCD'
+            self.iso_extract(source, assets['efi/microsoft/boot/bcd'], original_bcd)
+            self.report['bcd_preflight'] = json.loads(self.runner.run([
+                SYSTEM_PYTHON, str(ROOT/'pi5_studio/boot_hives.py'), 'bcd', str(original_bcd), '--check-only']))
+            original_loader = self.root/'original-loader.efi'
+            self.iso_extract(source, assets['efi/boot/bootaa64.efi'], original_loader)
+            loader = core.PE(original_loader.read_bytes())
+            need(loader.machine == core.MACHINE_ARM64 and loader.subsystem == 10, 'Original EFI loader is not ARM64')
             self.stage(10, 'Collecting compatible drivers for Setup, Windows and recovery')
             (self.root/'collection').mkdir()
             for image in boot_images:
@@ -284,6 +323,13 @@ class Build:
                 need(len(metadata) == 1 and metadata[0].architecture == 'ARM64', 'Each edition must have one ARM64 recovery image')
                 self.collect('recovery-'+str(image.index), recovery, 1)
                 recoveries[image.index] = recovery
+            environments = [('boot-'+str(i.index), session.media['boot'], i.index) for i in boot_images]
+            environments += [('install-'+str(i.index), session.media['install'], i.index) for i in install_images]
+            environments += [('recovery-'+str(i.index), recoveries[i.index], 1) for i in install_images]
+            for n, (environment, image_file, index) in enumerate(environments):
+                self.stage(10+int(n*9/len(environments)), 'Checking registry compatibility: '+environment)
+                self.preflight_hives(image_file, index, environment)
+            self.save()
             self.stage(20, 'Patching and signing the compatible drivers automatically')
             result = build_collection(self.root/'collection', self.root/'signed', self.root/'private-keys',
                                       CONTROLLER_ID, profiles=profiles, check_cancel=self.cancel.check,
@@ -302,18 +348,16 @@ class Build:
             setup_package = self.package('install-'+str(install_images[0].index))
             media = self.root/'media';media.mkdir()
             for name, member in assets.items():
-                if name not in ('sources/boot.wim', 'sources/install.wim', 'sources/install.esd'):
+                if name not in ('sources/boot.wim', 'sources/install.wim', 'sources/install.esd', 'efi/microsoft/boot/bcd'):
                     self.iso_extract(source, member, media/name)
-            loader = core.PE((media/'efi/boot/bootaa64.efi').read_bytes())
-            need(loader.machine == core.MACHINE_ARM64 and loader.subsystem == 10, 'Original EFI loader is not ARM64')
             bcd = media/'efi/microsoft/boot/bcd'
-            original_bcd = self.root/'original-BCD';bcd.rename(original_bcd)
+            bcd.parent.mkdir(parents=True, exist_ok=True)
             self.report['bcd'] = json.loads(self.runner.run([SYSTEM_PYTHON, str(ROOT/'pi5_studio/boot_hives.py'),
                                                             'bcd', str(original_bcd), str(bcd)]))
             (media/'sources').mkdir(exist_ok=True)
             boot = media/'sources/boot.wim';install = media/'sources/install.wim'
             self.stage(38, 'Preparing drivers while preserving Microsoft Setup')
-            shutil.copyfile(session.media['boot'], boot)
+            copy_file(session.media['boot'], boot, self.cancel)
             for image in boot_images:
                 extras = {}
                 for name in ('pi5nvme.sys', 'pi5nvme.inf', 'pi5nvme.cat', 'local-test-certificate.cer'):
@@ -390,15 +434,27 @@ class Build:
             self.notify(100, 'ISO ready. Background log and build report saved.')
             return self.report
         except Exception as exc:
+            followup_errors = []
             if (self.root/'private-keys').is_dir():
-                shutil.rmtree(self.root/'private-keys')
+                try:
+                    shutil.rmtree(self.root/'private-keys')
+                except OSError as cleanup_error:
+                    followup_errors.append('Private-key cleanup failed: '+str(cleanup_error))
             self.report.update(status='CANCELLED' if isinstance(exc, Cancelled) else 'FAILED', error=str(exc))
             # Once atomically published, the verified ISO is kept even if a
             # later report write fails. Never delete an existing user artifact.
             self.report['verified_output_published'] = published
-            self.save()
-            self.log(str(exc))
-            raise StudioError(str(exc)+'\nLog folder: '+str(self.root)) from exc
+            for label, action in (('Build report', self.save), ('Build log', lambda: self.log(str(exc)))):
+                try:
+                    action()
+                except OSError as write_error:
+                    followup_errors.append(label+' could not be saved: '+str(write_error))
+            message = str(exc)+'\nLog folder: '+str(self.root)
+            if published:
+                message += '\nThe verified ISO was already saved: '+str(output)
+            if followup_errors:
+                message += '\n'+'\n'.join(followup_errors)
+            raise StudioError(message) from exc
 
 
 def main():
